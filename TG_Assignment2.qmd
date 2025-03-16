@@ -1,0 +1,179 @@
+---
+title: "TG_Assignment2"
+author: "Tamar Gazit (B00842040)"
+format: html
+editor: visual
+---
+
+## Data Cleaning
+
+```{r}
+# Load necessary libraries
+library(tidyverse) # For data wrangling
+library(dplyr) # For data manipulation
+library(haven) # For reading SPSS (.sav) files
+library(flexplot) # For GLM analysis
+library(patchwork) # To arrange multiple flexplots into a single layout
+library(apaTables) # For table generation
+library(car) # For multicollinearity check
+
+# Import the dataset
+data <- read_sav("~/Desktop/PSYR 6003 - Advanced Statistics/TG_Assignment2/PSYR6003.A2.sav")
+```
+
+Change 'sex' to a factor variable with 0 = "Female" and 1 = "Male":
+
+```{r}
+# Check unique values in the sex column
+unique(data$sex)
+
+# Remove cases where sex is "Other (specify)"
+data <- data %>%
+  filter(sex %in% c("Female", "Male"))
+
+# Check if the cases were successfully removed
+unique(data$sex)  # Should now only show "Female" and "Male"
+
+# Convert sex to a factor with 0 = Female, 1 = Male
+data$sex <- factor(data$sex, 
+                   levels = c("Female", "Male"),  # Keep order consistent
+                   labels = c(0, 1))  # Assign 0 to Female, 1 to Male
+
+# Verify changes
+table(data$sex)  # Check how many participants are in each group
+```
+
+Create three new variables (subscale scores):
+
+```{r}
+# 1. REVERSE-CODE the original (unmodified) tipm.CONS2.3y item (on 1–7 scale)
+data <- data %>%
+  mutate(tipm.CONS2.3y_rc = 8 - tipm.CONS2.3y)
+
+# 2. COMPUTE SUBSCALE MEANS
+data <- data %>%
+  mutate(
+    # Socially Prescribed Perfectionism: Mean of 5 items
+    SPP_total = rowMeans(select(., mps.SPP1.3y, mps.SPP2.3y, mps.SPP3.3y, mps.SPP4.3y, mps.SPP5.3y), na.rm = TRUE),
+    
+    # Conscientiousness: Use reverse-coded version
+    CONS_total = rowMeans(select(., tipm.CONS1.3y, tipm.CONS2.3y_rc), na.rm = TRUE),
+    
+    # Negative Affect: Mean of 12 items
+    NA_total = rowMeans(select(., 
+      guilt1.3y, guilt2.3y, guilt3.3y,
+      dep1.3y, dep2.3y, dep3.3y,
+      fear1.3y, fear2.3y, fear3.3y,
+      host1.3y, host2.3y, host3.3y
+    ), na.rm = TRUE)
+  )
+
+# Summary of total scores
+summary(select(data, SPP_total, CONS_total, NA_total))
+
+# Check for missing values
+colSums(is.na(select(data, SPP_total, CONS_total, NA_total)))
+```
+
+## 1. State Hypotheses
+
+This study tested two hypotheses:
+
+First (H1), it was predicted that sex, conscientiousness, and socially prescribed perfectionism (SPP) would each significantly predict negative affect. Specifically, women were expected to report higher negative affect than men, higher conscientiousness was expected to relate to lower negative affect, and higher SPP was expected to relate to higher negative affect.
+
+Second (H2), it was predicted that SPP would explain unique variance in negative affect beyond the effects of sex and conscientiousness.
+
+## 2. Visualize Data
+
+#### A. Univariate Distributions
+
+```{r}
+# Visualize outcome variable: Negative Affect
+p1 <- flexplot(NA_total ~ 1, data = data)
+
+# Visualize predictors: Conscientiousness, SPP, and Sex
+p2 <- flexplot(CONS_total ~ 1, data = data)
+p3 <- flexplot(SPP_total ~ 1, data = data)
+p4 <- flexplot(sex ~ 1, data = data)
+
+# Display all 4 in a patchwork grid
+(p1 | p2) / (p3 | p4)
+```
+
+#### B. Bivariate Relationships
+
+```{r}
+# Negative Affect by Conscientiousness
+b1 <- flexplot(NA_total ~ CONS_total, data = data)
+
+# Negative Affect by SPP
+b2 <- flexplot(NA_total ~ SPP_total, data = data)
+
+# Negative Affect by Sex
+b3 <- flexplot(NA_total ~ sex, data = data)
+
+# Display all 3 together
+b1 + b2 + b3
+```
+
+## 3. Assumption Checking
+
+```{r}
+# Fit the full model (which predics Negative Affect from Sex, Conscientiousness, and SPP)
+full_model <- lm(NA_total ~ sex + CONS_total + SPP_total, data = data)
+
+# Visual diagnostic plots
+visualize(full_model, plot = "residuals")
+
+# Check multicollinearity
+vif(full_model)
+```
+
+## 4. Test H1
+
+```{r}
+# Full model with all predictors
+full_model <- lm(NA_total ~ sex + CONS_total + SPP_total, data = data)
+
+# Manually extract estimates
+summary(full_model)
+estimates(full_model)
+```
+
+## 5. Test H2
+
+```{r}
+# Fit the reduced model (without SPP)
+reduced_model <- lm(NA_total ~ sex + CONS_total, data = data)
+
+# Compare models
+model.comparison(reduced_model, full_model)
+
+# Manually extract estimates
+summary(reduced_model)
+summary(full_model)
+estimates(reduced_model)
+estimates(full_model)
+summary(full_model)$r.squared - summary(reduced_model)$r.squared
+```
+
+## 6. Create Tables
+
+```{r}
+# Table 1: Descriptives and Correlation Table
+# =============================================
+# Select analysis variables (excluding sex because it's categorical)
+analysis_vars <- data %>%
+  select(NA_total, CONS_total, SPP_total)
+
+# Create the APA-formatted correlation table
+apa.cor.table(analysis_vars, filename = "Table1_Descriptives_and_Correlations.doc")
+
+# Table 2: Regression Coefficients and Model Summary
+# =====================================================
+# Run full model
+full_model <- lm(NA_total ~ sex + CONS_total + SPP_total, data = data)
+
+# Create regression table
+apa.reg.table(full_model, filename = "Table2_Regression_Model.doc")
+```
